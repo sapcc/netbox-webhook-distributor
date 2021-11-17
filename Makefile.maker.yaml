@@ -1,0 +1,32 @@
+# Configuration file for <https://github.com/sapcc/go-makefile-maker>
+
+binaries:
+  - name:        webhook
+    fromPackage: ./cmd/webhook
+    installTo:   bin/
+  - name:        distributor
+    fromPackage: ./cmd/distributor
+    installTo:   bin/
+
+coverageTest:
+  only: '/pkg'
+  except: '/test'
+
+variables:
+  GO_LDFLAGS: '-X github.com/sapcc/netbox-webhook-distributor/pkg/netbox-webhook-distributor.VERSION=$(shell git rev-parse --verify HEAD | head -c 8)'
+
+vendoring:
+  enabled: true
+
+githubWorkflows:
+  global:
+    ignorePaths:
+      - "**.md" # all Markdown files
+  ci:
+    enabled: true
+    coveralls: true
+  license:
+    enabled: true
+  spellCheck:
+    enabled: true
+    ignorePaths: [] # override global setting so that nothing is ignored

@@ -7,7 +7,7 @@ require (
 	github.com/nats-io/nats.go v1.13.0
 	github.com/prometheus/client_golang v1.11.0
 	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726
-	gopkg.in/yaml.v2 v2.3.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (

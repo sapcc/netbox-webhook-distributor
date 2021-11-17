@@ -1,0 +1,85 @@
+apiVersion: "apps/v1"
+kind: Deployment
+metadata:
+  labels:
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+  name: netbox-webhook-dist-nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: netbox-webhook-dist-nats
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: netbox-webhook-dist-nats
+        release: {{ .Release.Name }}
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "7777"
+        prometheus.io/scrape: "true"
+        checksum/config: {{ include (print $.Template.BasePath "/nats-config.yaml") . | sha256sum }}
+    spec:
+      containers:
+      - name: stan
+        image: nats-streaming:0.16.2
+        ports:
+        - containerPort: 8222
+          name: monitor
+        - containerPort: 7777
+          name: metrics
+        args:
+         - "-sc"
+         - "/etc/stan-config/stan.conf"
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+          - name: config-volume
+            mountPath: /etc/stan-config
+          - name: nats-storage
+            mountPath: /data/stan
+        # Disable CPU limits.
+        resources:
+          requests:
+            cpu: 0
+
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8222
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: netbox-webhook-dist-nats-config
+      - name: nats-storage
+        persistentVolumeClaim:
+          claimName:  netbox-webhook-dist-nats-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: netbox-webhook-dist-nats
+  labels:
+    app: netbox-webhook-dist-nats
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+  selector:
+    app: netbox-webhook-dist-nats

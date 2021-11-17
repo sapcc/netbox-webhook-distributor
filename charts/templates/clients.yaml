@@ -1,0 +1,45 @@
+apiVersion: "apps/v1"
+kind: Deployment
+metadata:
+  labels:
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+  name: netbox-webhook-dist-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: netbox-webhook-dist-client
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: netbox-webhook-dist-client
+        release: {{ .Release.Name }}
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "7777"
+        prometheus.io/scrape: "true"
+        checksum/config: {{ include (print $.Template.BasePath "/client-config.yaml") . | sha256sum }}
+    spec:
+      containers:
+      - name: webhook
+        image: "{{ include "registry" . }}/{{ .Values.image }}:{{ .Values.image_version }}"
+        ports:
+        - containerPort: 80
+          name: webhook
+        command:
+          - webhook
+        env:
+        - name: NATS_URL
+          value: "netbox-webhook-dist-nats"
+      - name: distributor
+        image: "{{ include "registry" . }}/{{ .Values.image }}:{{ .Values.image_version }}"
+        ports:
+        - containerPort: 81
+          name: webhook
+        command:
+          - distributor
+        env:
+        - name: NATS_URL
+          value: "netbox-webhook-dist-nats"

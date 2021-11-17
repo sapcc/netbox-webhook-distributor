@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netbox-webhook-dist-client-config
+data:
+  config.yaml: |
+    distributor_list:
+    - name: "test01"
+        url: "http://test.com/webhook"
+        netbox_webhooks:
+        site:
+            - "created"
+            - "updated"
+            - "deleted"
+        device:
+            - "deleted"
+    - name: "test02"
+        url: "http://test.com/webhook"
+        netbox_webhooks:
+        site:
+            - "created"
+            - "updated"
+            - "deleted"
+        device:
+            - "deleted"
