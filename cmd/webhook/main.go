@@ -29,8 +29,6 @@ import (
 	"github.com/sapcc/netbox-webhook-distributor/pkg/webhooks"
 )
 
-var wait time.Duration
-
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	nc, err := nats.Connect(nats.DefaultURL)
