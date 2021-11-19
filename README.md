@@ -4,13 +4,11 @@ It uses Nats jetstream to save and replay incoming Netbox events.
 
 ## overview
 The netbox-webhook-distributor tries to resend an event in case of a ```http timeout``` or ```500 http status code```. The maximum retry/backoff strategy looks as follows:
-```json
-}
+```go
     Steps:    20,
-    Duration: 10 * time.Millisecond,
+    Duration: 10 ms,
     Factor:   2.0,
     Jitter:   0.1,
-}
 ```
 If all retries fail, the event will be dropped, and the next event will be processed. 
 The Netbox event data is not altered and distributed as is.
