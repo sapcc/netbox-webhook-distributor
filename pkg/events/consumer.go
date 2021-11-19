@@ -34,6 +34,22 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
+var waitBackoff = wait.Backoff{
+	Steps:    50,
+	Duration: 50 * time.Millisecond,
+	Factor:   1.1,
+	Jitter:   0.1,
+}
+
+type DispatchError struct {
+	StatusCode int
+	Err        error
+}
+
+func (d *DispatchError) Error() string {
+	return d.Err.Error()
+}
+
 type Consumer struct {
 	js              nats.JetStreamContext
 	name            string
@@ -115,14 +131,8 @@ func (c *Consumer) subscribe(subj, name, object string, ctx context.Context) {
 					continue
 				}
 				log.Debugf("dispatching: %s, %s", msg.Subject, c.distributionURL)
-				resultErr := retry.OnError(wait.Backoff{
-					Steps:    20,
-					Duration: 10 * time.Millisecond,
-					Factor:   2.0,
-					Jitter:   0.1,
-				}, func(err error) bool {
-					// only retry on timeout errors
-					return isTimeoutError(err)
+				resultErr := retry.OnError(waitBackoff, func(err error) bool {
+					return isRetryError(err)
 				}, func() error {
 					meta, _ := msg.Metadata()
 					if meta != nil {
@@ -154,9 +164,10 @@ func (c *Consumer) dispatch(data []byte) (err error) {
 		return
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("msg distribution not successful: http status-code %d", resp.StatusCode)
+		return &DispatchError{
+			StatusCode: resp.StatusCode,
+		}
 	}
 	return
 }
@@ -168,9 +179,16 @@ func (c *Consumer) ack(msg *nats.Msg) (err error) {
 	return
 }
 
-func isTimeoutError(err error) bool {
+// only retry on timeout or server (500 / 503) errors
+func isRetryError(err error) bool {
 	if err, ok := err.(net.Error); ok && err.Timeout() {
 		return true
+	}
+	if err, ok := err.(*DispatchError); ok {
+		if err.StatusCode == http.StatusInternalServerError ||
+			err.StatusCode == http.StatusServiceUnavailable {
+			return true
+		}
 	}
 	return false
 }

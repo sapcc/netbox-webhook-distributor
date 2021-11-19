@@ -56,7 +56,6 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, d := range cfg.DistributorList {
-		log.Infof("creating new consumer: %s", d.Name)
 		con, _ := events.NewConsumer(d, nc, ctx)
 		con.Subscribe(ctx)
 	}
