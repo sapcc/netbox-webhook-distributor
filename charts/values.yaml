@@ -1,2 +1,53 @@
-image: netbox-webhook-distributor
-image_version: "20211116094800"
+global:
+  region: qa-de-1
+image: keppel.eu-de-1.cloud.sap/ccloud/netbox-webhook-distributor
+image_version: "001"
+
+nats:
+  serverURL: netbox-webhook-dist-nats
+  serverNamePrefix: ""
+  # Toggle profiling.
+  # This enables nats-server pprof (profiling) port, so you can see goroutines
+  # stacks, memory heap sizes, etc.
+  profiling:
+    enabled: false
+    port: 6000
+  jetstream:
+    enabled: true
+    #############################
+    #                           #
+    #  Jetstream Memory Storage #
+    #                           #
+    #############################
+    memStorage:
+      enabled: true
+      size: 1Gi
+
+    ############################
+    #                          #
+    #  Jetstream File Storage  #
+    #                          #
+    ############################
+    fileStorage:
+      enabled: true
+      storageDirectory: /data
+      size: 1Gi
+      accessModes:
+        - ReadWriteOnce
+
+# Prometheus NATS Exporter configuration.
+exporter:
+  enabled: true
+  image: natsio/prometheus-nats-exporter:0.9.0
+  pullPolicy: IfNotPresent
+  securityContext: {}
+  resources: {}
+  # Prometheus operator ServiceMonitor support. Exporter has to be enabled
+  serviceMonitor:
+    enabled: false
+    ## Specify the namespace where Prometheus Operator is running
+    ##
+    # namespace: monitoring
+    labels: {}
+    annotations: {}
+    path: /metrics

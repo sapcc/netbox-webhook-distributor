@@ -19,4 +19,5 @@ package config
 type Options struct {
 	Version        string
 	ConfigFilePath string
+	LogLevel       int
 }

@@ -24,16 +24,21 @@ spec:
     spec:
       containers:
       - name: stan
-        image: nats-streaming:0.16.2
+        image: nats:2.6.3-alpine
         ports:
         - containerPort: 8222
           name: monitor
         - containerPort: 7777
           name: metrics
+        - containerPort: 4222
+          name: client
         args:
-         - "-sc"
-         - "/etc/stan-config/stan.conf"
+         - "nats-server"
+         - "--config"
+         - "/etc/nats-config/nats.conf"
         env:
+        - name: SERVER_NAME
+          value: {{ .Values.nats.serverNamePrefix }}$(POD_NAME)
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -44,20 +49,62 @@ spec:
               fieldPath: metadata.namespace
         volumeMounts:
           - name: config-volume
-            mountPath: /etc/stan-config
+            mountPath: /etc/nats-config
+          {{- if .Values.nats.jetstream.fileStorage.enabled }}
           - name: nats-storage
-            mountPath: /data/stan
+            mountPath: {{ .Values.nats.jetstream.fileStorage.storageDirectory }}
+          {{- end }}
         # Disable CPU limits.
         resources:
           requests:
             cpu: 0
-
         livenessProbe:
           httpGet:
             path: /
             port: 8222
           initialDelaySeconds: 10
           timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8222
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+        # Gracefully stop NATS Server on pod deletion or image upgrade.
+        lifecycle:
+          preStop:
+            exec:
+              # Using the alpine based NATS image, we add an extra sleep that is
+              # the same amount as the terminationGracePeriodSeconds to allow
+              # the NATS Server to gracefully terminate the client connections.
+              #
+              command:
+              - "/bin/sh"
+              - "-c"
+              - "nats-server -sl=ldm=/var/run/nats/nats.pid && /bin/sleep 60"
+      - name: metrics
+        image: {{ .Values.exporter.image }}
+        imagePullPolicy: {{ .Values.exporter.pullPolicy }}
+        {{- if .Values.exporter.securityContext }}
+        securityContext:
+        {{- .Values.exporter.securityContext | toYaml | nindent 10 }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.exporter.resources | nindent 10 }}
+        args:
+        - -connz
+        - -routez
+        - -subz
+        - -varz
+        - -prefix=nats
+        - -use_internal_server_id
+        {{- if .Values.nats.jetstream.enabled }}
+        - -jsz=all
+        {{- end }}
+        - http://localhost:8222/
+        ports:
+        - containerPort: 7777
+          name: metrics
       volumes:
       - name: config-volume
         configMap:
@@ -81,5 +128,9 @@ spec:
     port: 80
     targetPort: 80
     name: http
+  - protocol: TCP
+    port: 4222
+    targetPort: 4222
+    name: client
   selector:
     app: netbox-webhook-dist-nats

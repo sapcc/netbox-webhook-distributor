@@ -24,7 +24,7 @@ import (
 )
 
 type Config struct {
-	DistributorList []Distributor `yaml:"distributor_list"`
+	DistributorList []Distributor `yaml:"recipients"`
 }
 
 type Distributor struct {

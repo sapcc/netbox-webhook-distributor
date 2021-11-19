@@ -14,19 +14,13 @@
  * limitations under the License.
  */
 
-package webhooks
+package events
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-
 	"github.com/gorilla/mux"
-	"github.com/sapcc/netbox-webhook-distributor/pkg/events"
-	"github.com/siddontang/go/log"
 )
 
-type webhookBody struct {
+type WebhookBody struct {
 	Event     string
 	Timestamp string
 	Model     string
@@ -70,36 +64,7 @@ type change struct {
 	Status string `json:"status"`
 }
 
-// Netbox for http requests
-type Netbox struct {
+type Webhook struct {
 	Router    *mux.Router
-	Publisher *events.Publisher
-	//cfg    config.Config
-}
-
-// New http handler
-func NewNetbox(p *events.Publisher) *Netbox {
-	h := Netbox{mux.NewRouter(), p}
-	h.Router.HandleFunc("/handler/netbox/webhook", h.webhookHandler).Methods("POST")
-	return &h
-}
-
-func (h *Netbox) webhookHandler(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	wb := webhookBody{}
-	if err := json.NewDecoder(r.Body).Decode(&wb); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	log.Debugf("incoming webhook event: %s, region: %s, device-name: %s, status: %s, role: %s",
-		wb.Event, wb.Data.Site.Slug, wb.Data.Name, wb.Data.Status.Value, wb.Data.Role.Slug)
-
-	data, err := json.Marshal(wb)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-	if err = h.Publisher.Publish(fmt.Sprintf("NETBOX.%s.%s", wb.Model, wb.Event), data); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-
-	w.WriteHeader(http.StatusOK)
+	Publisher *Publisher
 }

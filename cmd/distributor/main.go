@@ -18,7 +18,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"flag"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,20 +28,35 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sapcc/netbox-webhook-distributor/pkg/config"
 	"github.com/sapcc/netbox-webhook-distributor/pkg/events"
+	"github.com/siddontang/go/log"
 )
 
+var opts config.Options
+
+func init() {
+	flag.StringVar(&opts.ConfigFilePath, "CONFIG_FILE", "./etc/config.yaml", "Path to the config file")
+	flag.IntVar(&opts.LogLevel, "LOG_LEVEL", 1, "Log level")
+	flag.Parse()
+}
+
 func main() {
+	log.SetLevel(opts.LogLevel)
 	ctx, cancel := context.WithCancel(context.Background())
-	nc, err := nats.Connect(nats.DefaultURL)
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = nats.DefaultURL
+	}
+	nc, err := nats.Connect(natsURL, nats.MaxReconnects(100))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	cfg, err := config.GetConfig(config.Options{ConfigFilePath: "./etc/config.yaml"})
+	cfg, err := config.GetConfig(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, d := range cfg.DistributorList {
+		log.Infof("creating new consumer: %s", d.Name)
 		con, _ := events.NewConsumer(d, nc, ctx)
 		con.Subscribe(ctx)
 	}
@@ -58,7 +73,7 @@ func main() {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			log.Println(err)
+			log.Error(err)
 		}
 	}()
 
@@ -68,6 +83,6 @@ func main() {
 	<-c
 
 	cancel()
-	log.Println("shutting down")
+	log.Info("shutting down")
 	os.Exit(0)
 }

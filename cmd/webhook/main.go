@@ -18,20 +18,33 @@ package main
 
 import (
 	"context"
-	"log"
+	"flag"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/sapcc/netbox-webhook-distributor/pkg/config"
 	"github.com/sapcc/netbox-webhook-distributor/pkg/events"
-	"github.com/sapcc/netbox-webhook-distributor/pkg/webhooks"
+	"github.com/siddontang/go/log"
 )
 
+var opts config.Options
+
+func init() {
+	flag.IntVar(&opts.LogLevel, "LOG_LEVEL", 1, "Log level")
+	flag.Parse()
+}
+
 func main() {
+	log.SetLevel(opts.LogLevel)
 	ctx, cancel := context.WithCancel(context.Background())
-	nc, err := nats.Connect(nats.DefaultURL)
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = nats.DefaultURL
+	}
+	nc, err := nats.Connect(natsURL, nats.MaxReconnects(100))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -39,7 +52,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	wh := webhooks.NewNetbox(p)
 
 	srv := &http.Server{
 		Addr: "0.0.0.0:80",
@@ -48,12 +60,12 @@ func main() {
 		// https://operations.global.cloud.sap/docs/support/playbook/kubernetes/idle_http_keep_alive_timeout.html
 		ReadTimeout: time.Second * 61,
 		IdleTimeout: time.Second * 61,
-		Handler:     wh.Router,
+		Handler:     p.Router,
 	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			log.Println(err)
+			log.Error(err)
 		}
 	}()
 
@@ -64,6 +76,6 @@ func main() {
 
 	cancel()
 	srv.Shutdown(ctx)
-	log.Println("shutting down")
+	log.Info("shutting down")
 	os.Exit(0)
 }

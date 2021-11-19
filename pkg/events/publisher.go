@@ -17,19 +17,25 @@
 package events
 
 import (
-	"log"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/siddontang/go/log"
+
+	"github.com/gorilla/mux"
 	"github.com/nats-io/nats.go"
 )
 
 const (
 	streamName     = "NETBOX"
-	streamSubjects = "NETBOX.*.*"
+	streamSubjects = "NETBOX.*"
 )
 
 type Publisher struct {
-	js nats.JetStreamContext
+	js     nats.JetStreamContext
+	Router *mux.Router
 }
 
 func NewPublisher(nc *nats.Conn) (p *Publisher, err error) {
@@ -38,16 +44,18 @@ func NewPublisher(nc *nats.Conn) (p *Publisher, err error) {
 		return
 	}
 	p = &Publisher{
-		js: js,
+		js:     js,
+		Router: mux.NewRouter(),
 	}
-
 	if err = p.createStream(); err != nil {
 		return
 	}
+	p.Router.HandleFunc("/handler/netbox/webhook", p.webhookHandler).Methods("POST")
 	return
 }
 
-func (p *Publisher) Publish(subj string, data []byte) (err error) {
+func (p *Publisher) publish(subj string, data []byte) (err error) {
+	log.Debug("publishing new event")
 	_, err = p.js.Publish(subj, data)
 	return
 }
@@ -55,15 +63,44 @@ func (p *Publisher) Publish(subj string, data []byte) (err error) {
 func (p *Publisher) createStream() (err error) {
 	stream, _ := p.js.StreamInfo(streamName)
 	if stream == nil {
-		log.Printf("creating stream %q and subjects %q", streamName, streamSubjects)
+		log.Debugf("creating stream %q and subjects %q", streamName, streamSubjects)
 		_, err = p.js.AddStream(&nats.StreamConfig{
 			Name:     streamName,
 			Subjects: []string{streamSubjects},
-			MaxAge:   24 * time.Hour,
+			MaxAge:   1 * time.Hour,
+		})
+		if err != nil {
+			return
+		}
+	} else {
+		_, err = p.js.UpdateStream(&nats.StreamConfig{
+			Name:     streamName,
+			Subjects: []string{streamSubjects},
+			MaxAge:   1 * time.Hour,
 		})
 		if err != nil {
 			return
 		}
 	}
 	return
+}
+
+func (p *Publisher) webhookHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	wb := WebhookBody{}
+	if err := json.NewDecoder(r.Body).Decode(&wb); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	log.Debugf("incoming webhook event: %s, region: %s, device-name: %s, status: %s, role: %s",
+		wb.Event, wb.Data.Site.Slug, wb.Data.Name, wb.Data.Status.Value, wb.Data.Role.Slug)
+
+	data, err := json.Marshal(wb)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	if err = p.publish(fmt.Sprintf("NETBOX.%s", wb.Model), data); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

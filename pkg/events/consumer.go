@@ -19,13 +19,19 @@ package events
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sapcc/netbox-webhook-distributor/pkg/config"
+	"github.com/siddontang/go/log"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 )
 
 type Consumer struct {
@@ -40,6 +46,7 @@ type Consumer struct {
 }
 
 func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *Consumer, err error) {
+	log.Debugf("creating new consumer %s", d.Name)
 	js, err := nc.JetStream()
 	if err != nil {
 		return
@@ -68,14 +75,12 @@ func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *C
 }
 
 func (c *Consumer) Subscribe(ctx context.Context) {
-	for object, events := range c.netboxWebhooks {
-		for _, e := range events {
-			go c.subscribe(fmt.Sprintf("NETBOX.%s.%s", object, e), fmt.Sprintf("%s-%s-%s", c.name, object, e), ctx)
-		}
+	for object := range c.netboxWebhooks {
+		go c.subscribe(fmt.Sprintf("NETBOX.%s", object), fmt.Sprintf("%s-%s", c.name, object), object, ctx)
 	}
 }
 
-func (c *Consumer) subscribe(subj string, name string, ctx context.Context) {
+func (c *Consumer) subscribe(subj, name, object string, ctx context.Context) {
 	sub, err := c.js.PullSubscribe(subj, name, nats.PullMaxWaiting(128))
 	if err != nil {
 		log.Fatal(err)
@@ -86,18 +91,54 @@ func (c *Consumer) subscribe(subj string, name string, ctx context.Context) {
 			return
 		default:
 		}
-		msgs, err := sub.Fetch(10, nats.Context(ctx))
+		msgs, err := sub.Fetch(1, nats.Context(ctx))
 		if err != nil {
+			if errors.Is(err, nats.ErrTimeout) {
+				return
+			}
 			continue
 		}
+	MESSAGES:
 		for _, msg := range msgs {
-			msg.Ack()
-			fmt.Println(string(msg.Data))
-			if err = c.dispatch(msg.Data); err != nil {
-				c.distributionErrors.Inc()
-				log.Printf("Error dispatching event: %s ==> %s", msg.Subject, c.distributionURL)
+			if err = msg.InProgress(nats.AckWait(6 * time.Second)); err != nil {
+				log.Errorf("set msg inProgress error %s", err.Error())
 				continue
 			}
+			wb := WebhookBody{}
+			if err = json.Unmarshal(msg.Data, &wb); err != nil {
+				log.Errorf("msg data unmarshal error %s", err.Error())
+				c.ack(msg)
+				continue
+			}
+			for _, e := range c.netboxWebhooks[object] {
+				if e != wb.Event {
+					continue
+				}
+				log.Debugf("dispatching: %s, %s", msg.Subject, c.distributionURL)
+				resultErr := retry.OnError(wait.Backoff{
+					Steps:    20,
+					Duration: 10 * time.Millisecond,
+					Factor:   2.0,
+					Jitter:   0.1,
+				}, func(err error) bool {
+					// only retry on timeout errors
+					return isTimeoutError(err)
+				}, func() error {
+					meta, _ := msg.Metadata()
+					if meta != nil {
+						log.Debugf("retry dispatching: %s, time: %s to %s", msg.Subject, meta.Timestamp, c.distributionURL)
+					}
+					return c.dispatch(msg.Data)
+				})
+				if resultErr != nil {
+					c.distributionErrors.Inc()
+					log.Debugf("error dispatching event: %s ==> %s: error %s", msg.Subject, c.distributionURL, resultErr.Error())
+					log.Errorf("done retrying to deliver event to %s. dropping event", c.name)
+					c.ack(msg)
+					continue MESSAGES
+				}
+			}
+			c.ack(msg)
 			c.distributionSuccess.Inc()
 		}
 	}
@@ -107,7 +148,7 @@ func (c *Consumer) dispatch(data []byte) (err error) {
 	req, err := http.NewRequest("POST", c.distributionURL, bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return
@@ -118,4 +159,18 @@ func (c *Consumer) dispatch(data []byte) (err error) {
 		return fmt.Errorf("msg distribution not successful: http status-code %d", resp.StatusCode)
 	}
 	return
+}
+
+func (c *Consumer) ack(msg *nats.Msg) (err error) {
+	if err = msg.AckSync(); err != nil {
+		log.Errorf("ackSync error: %s", err)
+	}
+	return
+}
+
+func isTimeoutError(err error) bool {
+	if err, ok := err.(net.Error); ok && err.Timeout() {
+		return true
+	}
+	return false
 }

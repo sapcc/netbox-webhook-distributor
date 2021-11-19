@@ -17,14 +17,11 @@ spec:
         app: netbox-webhook-dist-client
         release: {{ .Release.Name }}
       annotations:
-        prometheus.io/path: /metrics
-        prometheus.io/port: "7777"
-        prometheus.io/scrape: "true"
         checksum/config: {{ include (print $.Template.BasePath "/client-config.yaml") . | sha256sum }}
     spec:
       containers:
       - name: webhook
-        image: "{{ include "registry" . }}/{{ .Values.image }}:{{ .Values.image_version }}"
+        image: "{{ .Values.image }}:{{ .Values.image_version }}"
         ports:
         - containerPort: 80
           name: webhook
@@ -32,14 +29,74 @@ spec:
           - webhook
         env:
         - name: NATS_URL
-          value: "netbox-webhook-dist-nats"
+          value: "{{ .Values.nats.serverURL }}:4222"
       - name: distributor
-        image: "{{ include "registry" . }}/{{ .Values.image }}:{{ .Values.image_version }}"
+        image: "{{ .Values.image }}:{{ .Values.image_version }}"
         ports:
         - containerPort: 81
-          name: webhook
+          name: distributor
         command:
           - distributor
+          - --CONFIG_FILE=/etc/distributor/config.yaml
         env:
         - name: NATS_URL
-          value: "netbox-webhook-dist-nats"
+          value: "{{ .Values.nats.serverURL }}:4222"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/distributor
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 420
+          name: netbox-webhook-dist-client-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: netbox-webhook-dist-client
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "81"
+    prometheus.io/targets: "openstack"
+  labels:
+    app: netbox-webhook-dist-client
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: webhook
+  - protocol: TCP
+    port: 81
+    targetPort: 81
+    name: distributor
+  selector:
+    app: netbox-webhook-dist-client
+
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+
+metadata:
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    disco: "true"
+  name: netbox-webhook-dist-client
+
+spec:
+  rules:
+    - host:  netbox-webhook-dist.{{ .Values.global.region }}.cloud.sap
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: netbox-webhook-dist-client
+              servicePort: 80
+  tls:
+    - hosts:
+      - netbox-webhook-dist.{{ .Values.global.region }}.cloud.sap
+      secretName: tls-netbox-webhook-dist-client-{{ .Values.global.region }}-cloud-sap
