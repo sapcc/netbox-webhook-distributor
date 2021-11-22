@@ -85,9 +85,10 @@ func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *C
 		}),
 		netboxWebhooks: d.NetboxWebhooks,
 	}
-	prometheus.Register(c.distributionSuccess)
-	prometheus.Register(c.distributionErrors)
-	return
+	if err = prometheus.Register(c.distributionSuccess); err != nil {
+		return
+	}
+	return c, prometheus.Register(c.distributionErrors)
 }
 
 func (c *Consumer) Subscribe(ctx context.Context) {
@@ -156,8 +157,10 @@ func (c *Consumer) subscribe(subj, name, object string, ctx context.Context) {
 
 func (c *Consumer) dispatch(data []byte) (err error) {
 	req, err := http.NewRequest("POST", c.distributionURL, bytes.NewBuffer(data))
+	if err != nil {
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
-
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
