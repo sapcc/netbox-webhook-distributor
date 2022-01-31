@@ -16,4 +16,4 @@ RUN curl -Lo /bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/
 
 COPY --from=builder /pkg/ /usr/
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["/usr/bin/webhook"]
+CMD ["webhook"]

@@ -19,10 +19,10 @@ GO_LDFLAGS = -X github.com/sapcc/netbox-webhook-distributor/pkg/netbox-webhook-d
 GO_TESTENV =
 
 build/webhook: FORCE
-	go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/webhook ./cmd/webhook
+	GOOS=linux GOARCH=amd64 go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/webhook ./cmd/webhook
 
 build/distributor: FORCE
-	go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/distributor ./cmd/distributor
+	GOOS=linux GOARCH=amd64 go build $(GO_BUILDFLAGS) -ldflags '-s -w $(GO_LDFLAGS)' -o build/distributor ./cmd/distributor
 
 DESTDIR =
 ifeq ($(shell uname -s),Darwin)
