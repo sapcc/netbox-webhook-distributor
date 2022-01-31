@@ -24,12 +24,13 @@ import (
 )
 
 type Config struct {
-	DistributorList []Distributor `yaml:"recipients"`
+	DistributorList []Distributor `yaml:"distributor_list"`
 }
 
 type Distributor struct {
 	Name           string              `yaml:"name"`
 	URL            string              `yaml:"url"`
+	Region         string              `yaml:"region"`
 	NetboxWebhooks map[string][]string `yaml:"netbox_webhooks"`
 }
 

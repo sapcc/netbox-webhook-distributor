@@ -1,6 +1,7 @@
 distributor_list:
   - name: "test01"
     url: "http://test.com/webhook"
+    region: qa-de-1
     netbox_webhooks:
       site:
         - "created"
@@ -9,6 +10,7 @@ distributor_list:
       device:
         - "deleted"
   - name: "test02"
+    region: qa-de-2
     url: "http://test.com/webhook"
     netbox_webhooks:
       site:

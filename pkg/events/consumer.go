@@ -51,11 +51,9 @@ func (d *DispatchError) Error() string {
 }
 
 type Consumer struct {
-	js              nats.JetStreamContext
-	name            string
-	distributionURL string
-
-	netboxWebhooks map[string][]string
+	js     nats.JetStreamContext
+	name   string
+	config config.Distributor
 
 	distributionSuccess prometheus.Counter
 	distributionErrors  prometheus.Counter
@@ -68,9 +66,9 @@ func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *C
 		return
 	}
 	c = &Consumer{
-		name:            d.Name,
-		distributionURL: d.URL,
-		js:              js,
+		name:   d.Name,
+		config: d,
+		js:     js,
 		distributionSuccess: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem:   "distribution",
 			Name:        "success_total",
@@ -83,7 +81,6 @@ func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *C
 			Help:        "Total number of successfully distributed webhooks",
 			ConstLabels: prometheus.Labels{"consumer": d.Name},
 		}),
-		netboxWebhooks: d.NetboxWebhooks,
 	}
 	if err = prometheus.Register(c.distributionSuccess); err != nil {
 		return
@@ -92,8 +89,8 @@ func NewConsumer(d config.Distributor, nc *nats.Conn, ctx context.Context) (c *C
 }
 
 func (c *Consumer) Subscribe(ctx context.Context) {
-	for object := range c.netboxWebhooks {
-		go c.subscribe(fmt.Sprintf("NETBOX.%s", object), fmt.Sprintf("%s-%s", c.name, object), object, ctx)
+	for object := range c.config.NetboxWebhooks {
+		go c.subscribe(fmt.Sprintf("NETBOX.%s.%s", c.config.Region, object), fmt.Sprintf("%s-%s-%s", c.name, c.config.Region, object), object, ctx)
 	}
 }
 
@@ -127,23 +124,24 @@ func (c *Consumer) subscribe(subj, name, object string, ctx context.Context) {
 				c.ack(msg)
 				continue
 			}
-			for _, e := range c.netboxWebhooks[object] {
+			for _, e := range c.config.NetboxWebhooks[object] {
+				//update, create, delete
 				if e != wb.Event {
 					continue
 				}
-				log.Debugf("dispatching: %s, %s", msg.Subject, c.distributionURL)
+				log.Debugf("dispatching: %s, %s", msg.Subject, c.config.URL)
 				resultErr := retry.OnError(waitBackoff, func(err error) bool {
 					return isRetryError(err)
 				}, func() error {
 					meta, _ := msg.Metadata()
 					if meta != nil {
-						log.Debugf("retry dispatching: %s, time: %s to %s", msg.Subject, meta.Timestamp, c.distributionURL)
+						log.Debugf("retry dispatching: %s, time: %s to %s", msg.Subject, meta.Timestamp, c.config.URL)
 					}
 					return c.dispatch(msg.Data)
 				})
 				if resultErr != nil {
 					c.distributionErrors.Inc()
-					log.Debugf("error dispatching event: %s ==> %s: error %s", msg.Subject, c.distributionURL, resultErr.Error())
+					log.Debugf("error dispatching event: %s ==> %s: error %s", msg.Subject, c.config.URL, resultErr.Error())
 					log.Errorf("done retrying to deliver event to %s. dropping event", c.name)
 					c.ack(msg)
 					continue MESSAGES
@@ -156,7 +154,7 @@ func (c *Consumer) subscribe(subj, name, object string, ctx context.Context) {
 }
 
 func (c *Consumer) dispatch(data []byte) (err error) {
-	req, err := http.NewRequest("POST", c.distributionURL, bytes.NewBuffer(data))
+	req, err := http.NewRequest("POST", c.config.URL, bytes.NewBuffer(data))
 	if err != nil {
 		return
 	}

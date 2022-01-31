@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/siddontang/go/log"
 
@@ -30,7 +31,7 @@ import (
 
 const (
 	streamName     = "NETBOX"
-	streamSubjects = "NETBOX.*"
+	streamSubjects = "NETBOX.*.*"
 )
 
 type Publisher struct {
@@ -88,19 +89,29 @@ func (p *Publisher) createStream() (err error) {
 func (p *Publisher) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	wb := WebhookBody{}
+
 	if err := json.NewDecoder(r.Body).Decode(&wb); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
+	region := getRegionFromSite(wb.Data.Site.Slug)
 	log.Debugf("incoming webhook event: %s, region: %s, device-name: %s, status: %s, role: %s",
-		wb.Event, wb.Data.Site.Slug, wb.Data.Name, wb.Data.Status.Value, wb.Data.Role.Slug)
+		wb.Event, region, wb.Data.Name, wb.Data.Status.Value, wb.Data.Role.Slug)
 
 	data, err := json.Marshal(wb)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	if err = p.publish(fmt.Sprintf("NETBOX.%s", wb.Model), data); err != nil {
+	if err = p.publish(fmt.Sprintf("NETBOX.%s.%s", region, wb.Model), data); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func getRegionFromSite(site string) string {
+	r, s := utf8.DecodeLastRuneInString(site)
+	if r == utf8.RuneError && (s == 0 || s == 1) {
+		s = 0
+	}
+	return site[:len(site)-s]
 }
