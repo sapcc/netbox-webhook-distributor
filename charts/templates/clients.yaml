@@ -78,7 +78,7 @@ spec:
     app: netbox-webhook-dist-client
 
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 
 metadata:
@@ -93,9 +93,12 @@ spec:
       http:
         paths:
           - path: /
+            pathType: Prefix
             backend:
-              serviceName: netbox-webhook-dist-client
-              servicePort: 80
+              service:
+                name: netbox-webhook-dist-client
+                port:
+                  number: 80
   tls:
     - hosts:
       - netbox-webhook-dist.{{ .Values.global.region }}.cloud.sap
